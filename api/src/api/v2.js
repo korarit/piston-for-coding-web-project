@@ -8,6 +8,8 @@ const { Job } = require('../job');
 const package = require('../package');
 const logger = require('logplease').create('api/v2');
 
+const authentication = require('./authentication');
+
 const SIGNALS = [
     'SIGABRT',
     'SIGALRM',
@@ -271,7 +273,7 @@ router.ws('/connect', async (ws, req) => {
     }, 1000);
 });
 
-router.post('/execute', async (req, res) => {
+router.post('/execute', authentication, async (req, res) => {
     let job;
     try {
         job = await get_job(req.body);
