@@ -328,7 +328,7 @@ class Job {
                 let memory_use = (mem_usage.reduce((a, b) => Math.max(a, b), 0) / mem_usage.length);
                 const totalCPUTime = parseFloat(systemTime) + parseFloat(userTime);
 
-                resolve({ stdout, stderr, code, signal, output, elapsedTime: parseFloat(totalCPUTime) * 1e9, memory_use });
+                resolve({ stdout, stderr, code, signal, output, real_use_time: parseFloat(realTime) * 1e9, cpu_use_time: parseFloat(totalCPUTime) * 1e9, memory_use });
             });
 
             proc.on('error', async err => {
@@ -349,7 +349,7 @@ class Job {
 
                 let memory_use = (mem_usage.reduce((a, b) => Math.max(a, b), 0) / mem_usage.length);
 
-                reject({ error: err, stdout, stderr, output, elapsedTime: parseFloat(totalCPUTime) * 1e9, memory_use });
+                reject({ error: err, stdout, stderr, output, real_use_time: parseFloat(realTime) * 1e9, cpu_use_time: parseFloat(totalCPUTime) * 1e9, memory_use });
             });
         });
     }

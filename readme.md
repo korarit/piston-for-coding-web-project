@@ -289,7 +289,9 @@ Content-Type: application/json
         "output": "[\n  '/piston/packages/node/15.10.0/bin/node',\n  '/piston/jobs/9501b09d-0105-496b-b61a-e5148cf66384/my_cool_code.js',\n  '1',\n  '2',\n  '3'\n]\n",
         "code": 0,
         "signal": null,
-        "elapsedTime": 317705129,
+        "cpu_use_time": 317705129,
+        "real_use_time": 517705129,
+
         "memory_use": 374
     }
 }
