@@ -2,7 +2,7 @@ version: '3.2'
 
 services:
     api:
-        image: piston_for_coding_web_project_bata_v3
+        image: piston_for_coding_web_project_bata_v4
         container_name: piston_api
         restart: always
         ports:
@@ -12,3 +12,4 @@ services:
         tmpfs:
             - /piston/jobs:exec,uid=1000,gid=1000,mode=711
             - /tmp:exec
+            - /tmp/time_execute_code:exec,mode=777

@@ -155,7 +155,20 @@ class Job {
 
     
     async safe_call(file, args, timeout, memory_limit, event_bus = null) {
-        return new Promise((resolve, reject) => {
+
+        async function ensureTimeExecuteCodeDir() {
+            const timeDir = path.join('/tmp', 'time_execute_code');
+            try {
+                await fs.mkdir(timeDir, { recursive: true });
+                // ไม่จำเป็นต้อง chown ใน Docker เพราะเรามักจะรันด้วย root หรือ user ที่กำหนดไว้แล้ว
+            } catch (error) {
+                this.logger.warn(`Failed to create time_execute_code directory: ${error}`);
+            }
+            return timeDir;
+        }
+        
+
+        return new Promise(async (resolve, reject) => {
             const nonetwork = config.disable_networking ? ['nosocket'] : [];
 
             const prlimit = [
@@ -176,8 +189,14 @@ class Job {
                 prlimit.push('--as=' + memory_limit);
             }
 
+            const timeDir = await ensureTimeExecuteCodeDir();
+            const timeOutputFile = path.join(timeDir, `time_output_${this.uuid}.txt`);
+
             const proc_call = [
                 'nice',
+                '/usr/bin/time',
+                '-o', timeOutputFile,
+                '-f', '%e,%S,%U',
                 ...timeout_call,
                 ...prlimit,
                 ...nonetwork,
@@ -189,7 +208,6 @@ class Job {
             let stdout = '';
             let stderr = '';
             let output = '';
-            let startTime, endTime, elapsedTime = 0;
             var mem_usage = [];
 
             const proc = cp.spawn(proc_call[0], proc_call.splice(1), {
@@ -206,7 +224,6 @@ class Job {
 
             this.#active_parent_processes.push(proc);
 
-            startTime = process.hrtime.bigint();
 
             if (event_bus === null) {
                 proc.stdin.write(this.stdin);
@@ -292,27 +309,47 @@ class Job {
 
             proc.on('exit', () => this.exit_cleanup());
 
-            proc.on('close', (code, signal) => {
+            proc.on('close', async (code, signal) => {
                 this.close_cleanup();
 
-                endTime = process.hrtime.bigint();
-                elapsedTime = endTime - startTime; // in nanoseconds
+
+                let timeOutput;
+                try {
+                    timeOutput = await fs.readFile(timeOutputFile, 'utf8');
+                    await fs.unlink(timeOutputFile).catch(() => {});  // ลบไฟล์หลังจากอ่านเสร็จ
+                } catch (error) {
+                    this.logger.warn(`Failed to read time output: ${error}`);
+                    timeOutput = '0,0,0';  // ค่าเริ่มต้นในกรณีที่เกิดข้อผิดพลาด
+                }
+
+                const [realTime, systemTime, userTime] = timeOutput.trim().split(',');
+
 
                 let memory_use = (mem_usage.reduce((a, b) => Math.max(a, b), 0) / mem_usage.length);
+                const totalCPUTime = parseFloat(systemTime) + parseFloat(userTime);
 
-                resolve({ stdout, stderr, code, signal, output, elapsedTime: parseInt(elapsedTime.toString()), memory_use });
+                resolve({ stdout, stderr, code, signal, output, elapsedTime: parseFloat(totalCPUTime) * 1e9, memory_use });
             });
 
-            proc.on('error', err => {
+            proc.on('error', async err => {
                 this.exit_cleanup();
                 this.close_cleanup();
 
-                endTime = process.hrtime.bigint();
-                elapsedTime = endTime - startTime; // in nanoseconds
+                let timeOutput;
+                try {
+                    timeOutput = await fs.readFile(timeOutputFile, 'utf8');
+                    await fs.unlink(timeOutputFile).catch(() => {});  // ลบไฟล์หลังจากอ่านเสร็จ
+                } catch (error) {
+                    this.logger.warn(`Failed to read time output: ${error}`);
+                    timeOutput = '0,0,0';  // ค่าเริ่มต้นในกรณีที่เกิดข้อผิดพลาด
+                }
+
+                const [realTime, systemTime, userTime] = timeOutput.trim().split(',');
+                const totalCPUTime = parseFloat(systemTime) + parseFloat(userTime);
 
                 let memory_use = (mem_usage.reduce((a, b) => Math.max(a, b), 0) / mem_usage.length);
 
-                reject({ error: err, stdout, stderr, output, elapsedTime: parseInt(elapsedTime.toString()), memory_use });
+                reject({ error: err, stdout, stderr, output, elapsedTime: parseFloat(totalCPUTime) * 1e9, memory_use });
             });
         });
     }
