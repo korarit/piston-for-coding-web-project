@@ -2,7 +2,7 @@ version: '3.2'
 
 services:
     api:
-        image: piston_for_coding_web_project_bata_v2
+        image: piston_for_coding_web_project_bata_v3
         container_name: piston_api
         restart: always
         ports:

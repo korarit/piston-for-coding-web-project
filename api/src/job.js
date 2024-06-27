@@ -300,7 +300,7 @@ class Job {
 
                 let memory_use = (mem_usage.reduce((a, b) => Math.max(a, b), 0) / mem_usage.length);
 
-                resolve({ stdout, stderr, code, signal, output, elapsedTime: elapsedTime.toString(), memory_use });
+                resolve({ stdout, stderr, code, signal, output, elapsedTime: parseInt(elapsedTime.toString()), memory_use });
             });
 
             proc.on('error', err => {
@@ -312,7 +312,7 @@ class Job {
 
                 let memory_use = (mem_usage.reduce((a, b) => Math.max(a, b), 0) / mem_usage.length);
 
-                reject({ error: err, stdout, stderr, output, elapsedTime: elapsedTime.toString(), memory_use });
+                reject({ error: err, stdout, stderr, output, elapsedTime: parseInt(elapsedTime.toString()), memory_use });
             });
         });
     }
