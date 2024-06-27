@@ -103,7 +103,7 @@ class Job {
             });
             await fs.chown(path.dirname(file_path), this.uid, this.gid);
 
-            await fs.write_file(file_path, file_content);
+            await fs.writeFile(file_path, file_content);
             await fs.chown(file_path, this.uid, this.gid);
         }
 
@@ -114,7 +114,7 @@ class Job {
 
     exit_cleanup() {
         for (const timeout of this.#active_timeouts) {
-            clear_timeout(timeout);
+            clearTimeout(timeout);
         }
         this.#active_timeouts = [];
         this.logger.debug('Cleared the active timeouts');
@@ -135,7 +135,25 @@ class Job {
         this.#active_parent_processes = [];
         this.logger.debug('Destroyed processes writables');
     }
+    
+    measureMemory (proc) {
+        let mem_usage = 0;
+        try {
+            const psOutput = cp.execSync(`ps -o rss= -p ${proc.pid}`).toString().trim();
+            const currentMemUsage = parseInt(psOutput, 10);
+            if (!isNaN(currentMemUsage) && currentMemUsage > mem_usage) {
+                mem_usage = currentMemUsage;
+            }
+            return mem_usage;
+        } catch (e) {
+            // ถ้าเกิดข้อผิดพลาด จะใช้ค่าล่าสุดที่วัดได้
+            this.logger.warn(`Failed to get memory usage: ${e}`);
 
+            return 0;
+        }
+    };
+
+    
     async safe_call(file, args, timeout, memory_limit, event_bus = null) {
         return new Promise((resolve, reject) => {
             const nonetwork = config.disable_networking ? ['nosocket'] : [];
@@ -168,9 +186,11 @@ class Job {
                 ...args,
             ];
 
-            var stdout = '';
-            var stderr = '';
-            var output = '';
+            let stdout = '';
+            let stderr = '';
+            let output = '';
+            let startTime, endTime, elapsedTime = 0;
+            var mem_usage = [];
 
             const proc = cp.spawn(proc_call[0], proc_call.splice(1), {
                 env: {
@@ -185,6 +205,8 @@ class Job {
             });
 
             this.#active_parent_processes.push(proc);
+
+            startTime = process.hrtime.bigint();
 
             if (event_bus === null) {
                 proc.stdin.write(this.stdin);
@@ -202,7 +224,7 @@ class Job {
 
             const kill_timeout =
                 (timeout >= 0 &&
-                    set_timeout(async _ => {
+                    setTimeout(async _ => {
                         this.logger.info(`Timeout exceeded timeout=${timeout}`);
                         try {
                             process.kill(proc.pid, 'SIGKILL');
@@ -218,7 +240,12 @@ class Job {
                 null;
             this.#active_timeouts.push(kill_timeout);
 
+            mem_usage.push(this.measureMemory(proc));
+
             proc.stderr.on('data', async data => {
+
+                mem_usage.push(this.measureMemory(proc));
+
                 if (event_bus !== null) {
                     event_bus.emit('stderr', data);
                 } else if ((stderr.length + data.length) > this.runtime.output_max_size) {
@@ -240,6 +267,9 @@ class Job {
             });
 
             proc.stdout.on('data', async data => {
+
+                mem_usage.push(this.measureMemory(proc));
+
                 if (event_bus !== null) {
                     event_bus.emit('stdout', data);
                 } else if ((stdout.length + data.length) > this.runtime.output_max_size) {
@@ -265,14 +295,24 @@ class Job {
             proc.on('close', (code, signal) => {
                 this.close_cleanup();
 
-                resolve({ stdout, stderr, code, signal, output });
+                endTime = process.hrtime.bigint();
+                elapsedTime = endTime - startTime; // in nanoseconds
+
+                let memory_use = (mem_usage.reduce((a, b) => Math.max(a, b), 0) / mem_usage.length);
+
+                resolve({ stdout, stderr, code, signal, output, elapsedTime: elapsedTime.toString(), memory_use });
             });
 
             proc.on('error', err => {
                 this.exit_cleanup();
                 this.close_cleanup();
 
-                reject({ error: err, stdout, stderr, output });
+                endTime = process.hrtime.bigint();
+                elapsedTime = endTime - startTime; // in nanoseconds
+
+                let memory_use = (mem_usage.reduce((a, b) => Math.max(a, b), 0) / mem_usage.length);
+
+                reject({ error: err, stdout, stderr, output, elapsedTime: elapsedTime.toString(), memory_use });
             });
         });
     }
@@ -361,26 +401,26 @@ class Job {
         while (processes.length > 0) {
             processes = [];
 
-            const proc_ids = fss.readdir_sync('/proc');
+            const proc_ids = fss.readdirSync('/proc');
 
             processes = proc_ids.map(proc_id => {
                 if (isNaN(proc_id)) return -1;
                 try {
-                    const proc_status = fss.read_file_sync(
+                    const proc_status = fss.readFileSync(
                         path.join('/proc', proc_id, 'status')
                     );
-                    const proc_lines = proc_status.to_string().split('\n');
+                    const proc_lines = proc_status.toString().split('\n');
                     const state_line = proc_lines.find(line =>
-                        line.starts_with('State:')
+                        line.startsWith('State:')
                     );
                     const uid_line = proc_lines.find(line =>
-                        line.starts_with('Uid:')
+                        line.startsWith('Uid:')
                     );
                     const [_, ruid, euid, suid, fuid] = uid_line.split(/\s+/);
 
                     const [_1, state, user_friendly] = state_line.split(/\s+/);
 
-                    const proc_id_int = parse_int(proc_id);
+                    const proc_id_int = parseInt(proc_id);
 
                     // Skip over any processes that aren't ours.
                     if (ruid != this.uid && euid != this.uid) return -1;
