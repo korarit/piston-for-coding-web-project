@@ -4,16 +4,7 @@ const Logger = require('logplease');
 
 const grpc = require('@grpc/grpc-js');
 const protoLoader = require('@grpc/proto-loader');
-const packageDefinition = protoLoader.loadSync(path.join(__dirname, './protos/service.proto'),{
-    keepCase: true,
-    longs: String,
-    enums: String,
-    defaults: true,
-    oneofs: true
-});
-const degreeProto = grpc.loadPackageDefinition(packageDefinition);
 
-const expressWs = require('express-ws');
 const globals = require('./globals');
 const config = require('./config');
 const path = require('path');
@@ -21,6 +12,18 @@ const fs = require('fs/promises');
 const fss = require('fs');
 const body_parser = require('body-parser');
 const runtime = require('./runtime');
+
+const packageDefinition = protoLoader.loadSync(path.join(__dirname, './protos/service.proto'),{
+    keepCase: true,
+    longs: String,
+    enums: String,
+    defaults: true,
+    oneofs: true
+});
+const microservice = grpc.loadPackageDefinition(packageDefinition);
+var servicePackage = microservice.backend;
+
+
 
 const logger = Logger.create('index');
 (async () => {
@@ -82,49 +85,25 @@ const logger = Logger.create('index');
     ////////////////////////////// API SERVER //////////////////////////////
 
     logger.info('Starting API Server');
-    logger.debug('Constructing Express App');
-    logger.debug('Registering middleware');
 
-    app.use(body_parser.urlencoded({ extended: true }));
-    app.use(body_parser.json());
+    const {executeAPI, getRunTimeAPI, getPackageListAPI, installPackageAPI, uninstallPackageAPI} = require('./api/v2');
 
-    app.use((err, req, res, next) => {
-        return res.status(400).send({
-            stack: err.stack,
-        });
-    });
-
-    logger.debug('Registering Routes');
-
-    const {executeAPI, router} = require('./api/v2');
-    app.use('/api/v2', router);
-
-    const { version } = require('../package.json');
-
-    app.get('/', (req, res, next) => {
-        return res.status(200).send({ message: `Piston v${version}` });
-    });
-
-    app.use((req, res, next) => {
-        return res.status(404).send({ message: 'Not Found' });
-    });
-
-    logger.debug('Calling app.listen');
-    const [address, port] = config.bind_address.split(':');
-
-    const server = app.listen(port, address, () => {
-        logger.info('API server started on', config.bind_address);
-    });
 
     //////////////////////////// MICROSERVICE SERVER ////////////////////////////
     const serverMicro = new grpc.Server();
 
-    server.addService(degreeProto.ExcuteCodeService.service, { sendtoexcutecode: findDegree });
-    server.bindAsync('0.0.0.0:50051', grpc.ServerCredentials.createInsecure(), () => {
-        server.start();
-    });
-    
+    serverMicro.addService(servicePackage.ExcuteCodeService.service, { 
+        executeAPI,
+        getRunTimeAPI,
+        getPackageListAPI,
+        installPackageAPI,
+        uninstallPackageAPI
+     });
 
+    logger.info('Starting Microservice Server');
+    serverMicro.bindAsync('0.0.0.0:50051', grpc.ServerCredentials.createInsecure(), () => {
+        // serverMicro.start();
+    });
 
     process.on('SIGTERM', () => {
         server.close();

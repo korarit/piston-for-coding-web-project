@@ -3,14 +3,11 @@
 
 const grpc = require('@grpc/grpc-js');
 
-const events = require('events');
 
 const runtime = require('../runtime');
 const { Job } = require('../job');
 const package = require('../package');
 const logger = require('logplease').create('api/v2');
-
-const authentication = require('./authentication');
 
 const SIGNALS = [
     'SIGABRT',
@@ -162,126 +159,24 @@ function get_job(body) {
     });
 }
 
-router.use((req, res, next) => {
-    if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
-        return next();
-    }
-
-    if (!req.headers['content-type']?.startsWith('application/json')) {
-        return res.status(415).send({
-            message: 'requests must be of type application/json',
-        });
-    }
-
-    next();
-});
-
-router.ws('/connect', async (ws, req) => {
-    let job = null;
-    let event_bus = new events.EventEmitter();
-
-    event_bus.on('stdout', data =>
-        ws.send(
-            JSON.stringify({
-                type: 'data',
-                stream: 'stdout',
-                data: data.toString(),
-            })
-        )
-    );
-    event_bus.on('stderr', data =>
-        ws.send(
-            JSON.stringify({
-                type: 'data',
-                stream: 'stderr',
-                data: data.toString(),
-            })
-        )
-    );
-    event_bus.on('stage', stage =>
-        ws.send(JSON.stringify({ type: 'stage', stage }))
-    );
-    event_bus.on('exit', (stage, status) =>
-        ws.send(JSON.stringify({ type: 'exit', stage, ...status }))
-    );
-
-    ws.on('message', async data => {
-        try {
-            const msg = JSON.parse(data);
-
-            switch (msg.type) {
-                case 'init':
-                    if (job === null) {
-                        job = await get_job(msg);
-
-                        try {
-                            await job.prime();
-
-                            ws.send(
-                                JSON.stringify({
-                                    type: 'runtime',
-                                    language: job.runtime.language,
-                                    version: job.runtime.version.raw,
-                                })
-                            );
-
-                            await job.execute(event_bus);
-                        } catch (error) {
-                            logger.error(
-                                `Error cleaning up job: ${job.uuid}:\n${error}`
-                            );
-                            throw error;
-                        } finally {
-                            await job.cleanup();
-                        }
-                        ws.close(4999, 'Job Completed'); // Will not execute if an error is thrown above
-                    } else {
-                        ws.close(4000, 'Already Initialized');
-                    }
-                    break;
-                case 'data':
-                    if (job !== null) {
-                        if (msg.stream === 'stdin') {
-                            event_bus.emit('stdin', msg.data);
-                        } else {
-                            ws.close(4004, 'Can only write to stdin');
-                        }
-                    } else {
-                        ws.close(4003, 'Not yet initialized');
-                    }
-                    break;
-                case 'signal':
-                    if (job !== null) {
-                        if (SIGNALS.includes(msg.signal)) {
-                            event_bus.emit('signal', msg.signal);
-                        } else {
-                            ws.close(4005, 'Invalid signal');
-                        }
-                    } else {
-                        ws.close(4003, 'Not yet initialized');
-                    }
-                    break;
-            }
-        } catch (error) {
-            ws.send(JSON.stringify({ type: 'error', message: error.message }));
-            ws.close(4002, 'Notified Error');
-            // ws.close message is limited to 123 characters, so we notify over WS then close.
-        }
-    });
-
-    setTimeout(() => {
-        //Terminate the socket after 1 second, if not initialized.
-        if (job === null) ws.close(4001, 'Initialization Timeout');
-    }, 1000);
-});
-
-
 async function executeAPI(call, callback){
     let job;
+
+    logger.info('Executing job', call.request);
+
+    let data = {
+        ...call.request,
+        compile_timeout: Number(call.request.compile_timeout),
+        compile_memory_limit: Number(call.request.compile_memory_limit),
+        run_memory_limit: Number(call.request.run_memory_limit),
+    }
     try {
-        job = await get_job(req.body);
+        job = await get_job(data);
     } catch (error) {
-        return res.status(400).json(error);
+        return callback({
+            code: grpc.status.INVALID_ARGUMENT,
+            message: error.message
+        });
     }
     try {
         await job.prime();
@@ -292,11 +187,12 @@ async function executeAPI(call, callback){
             result.run = result.compile;
         }
 
-        callback(null, wrapper);
+        logger.info(`Jobexecuted successfully`, result);
+        return callback(null, result);
 
     } catch (error) {
         logger.error(`Error executing job: ${job.uuid}:\n${error}`);
-        callback({
+        return callback({
             message: 'Error executing job',
             code: grpc.status.INTERNAL
         });
@@ -313,38 +209,10 @@ async function executeAPI(call, callback){
     }
 }
 
-router.post('/execute', authentication, async (req, res) => {
-    let job;
-    try {
-        job = await get_job(req.body);
-    } catch (error) {
-        return res.status(400).json(error);
-    }
-    try {
-        await job.prime();
 
-        let result = await job.execute();
-        // Backward compatibility when the run stage is not started
-        if (result.run === undefined) {
-            result.run = result.compile;
-        }
+async function getRunTimeAPI(call, callback){
 
-        return res.status(200).send(result);
-    } catch (error) {
-        logger.error(`Error executing job: ${job.uuid}:\n${error}`);
-        return res.status(500).send();
-    } finally {
-        try {
-            await job.cleanup(); // This gets executed before the returns in try/catch
-        } catch (error) {
-            logger.error(`Error cleaning up job: ${job.uuid}:\n${error}`);
-            return res.status(500).send(); // On error, this replaces the return in the outer try-catch
-        }
-    }
-});
-
-
-async function runTimeAPI(call, callback){
+    logger.info('Getting runtimes');
     const runtimes = runtime.map(rt => {
         return {
             language: rt.language,
@@ -357,19 +225,6 @@ async function runTimeAPI(call, callback){
     callback(null, {runtimes: runtimes});
 }
 
-router.get('/runtimes', (req, res) => {
-    const runtimes = runtime.map(rt => {
-        return {
-            language: rt.language,
-            version: rt.version.raw,
-            aliases: rt.aliases,
-            runtime: rt.runtime,
-        };
-    });
-
-    return res.status(200).send(runtimes);
-});
-
 async function getPackageListAPI(call, callback){
     let packages = await package.get_package_list();
 
@@ -381,25 +236,8 @@ async function getPackageListAPI(call, callback){
         };
     });
 
-    callback(null, {packages: packages});
+    callback(null, { packages: packages });
 }
-
-
-router.get('/packages', async (req, res) => {
-    logger.debug('Request to list packages');
-    let packages = await package.get_package_list();
-
-    packages = packages.map(pkg => {
-        return {
-            language: pkg.language,
-            language_version: pkg.version.raw,
-            installed: pkg.installed,
-        };
-    });
-
-    return res.status(200).send(packages);
-});
-
 
 async function installPackageAPI(call, callback){
     let { language, version } = call.request;
@@ -415,71 +253,38 @@ async function installPackageAPI(call, callback){
 
     try {
         let response = await pkg.install();
-        callback(null, response);
+        return callback(null, response);
     } catch (error) {
         logger.error(`Error while installing package ${pkg.language}-${pkg.version}:\n${error}`);
-        callback({
+        return callbackcallback({
             message: error.message,
             code: grpc.status.INTERNAL
         });
     }
 }
-router.post('/packages', async (req, res) => {
-    logger.debug('Request to install package');
 
-    const { language, version } = req.body;
+async function uninstallPackageAPI(call, callback){
+    let { language, version } = call.request;
 
-    const pkg = await package.get_package(language, version);
+    let pkg = await package.get_package(language, version);
 
     if (pkg == null) {
-        return res.status(404).send({
+        return callback({
             message: `Requested package ${language}-${version} does not exist`,
+            code: grpc.status.NOT_FOUND
         });
     }
 
     try {
-        const response = await pkg.install();
-
-        return res.status(200).send(response);
-    } catch (e) {
-        logger.error(
-            `Error while installing package ${pkg.language}-${pkg.version}:`,
-            e.message
-        );
-
-        return res.status(500).send({
-            message: e.message,
+        let response = await pkg.uninstall();
+        return callback(null, response);
+    } catch (error) {
+        logger.error(`Error while uninstalling package ${pkg.language}-${pkg.version}:\n${error}`);
+        return callback({
+            message: error.message,
+            code: grpc.status.INTERNAL
         });
     }
-});
+}
 
-router.delete('/packages', async (req, res) => {
-    logger.debug('Request to uninstall package');
-
-    const { language, version } = req.body;
-
-    const pkg = await package.get_package(language, version);
-
-    if (pkg == null) {
-        return res.status(404).send({
-            message: `Requested package ${language}-${version} does not exist`,
-        });
-    }
-
-    try {
-        const response = await pkg.uninstall();
-
-        return res.status(200).send(response);
-    } catch (e) {
-        logger.error(
-            `Error while uninstalling package ${pkg.language}-${pkg.version}:`,
-            e.message
-        );
-
-        return res.status(500).send({
-            message: e.message,
-        });
-    }
-});
-
-module.exports = {executeAPI, router};
+module.exports = {executeAPI, getRunTimeAPI, getPackageListAPI, installPackageAPI, uninstallPackageAPI};

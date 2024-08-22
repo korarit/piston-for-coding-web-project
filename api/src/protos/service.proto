@@ -3,68 +3,84 @@ syntax="proto3";
 // this will be package of the generated code
 package backend;
 
-option go_package = "/backend";
-
 // Message structure
 message ExcuteCode {
     // Field number 1-15 use 1 byte, while field 16th - 2047th use 2 bytes
     // So, the first 15 fields should be reserved for fields that are used oftenly
-    string code = 1;
-    string runtime = 2;
-    string input = 3;
-    repeated string args = 4;
-    int64 time_limit = 5;
-    int64 memory_limit = 6;
-}
-
-message ResultExcuteCodeNoCompile {
-    message Result {
-        string language = 1;
-        string version = 2;
-
-        message run {
-            string stdout = 1;
-            string stderr = 2;
-            string output = 3;
-            int64 time_usage_cpu = 4;
-            int64 time_usage_real = 5;
-            int64 memory_usage = 6;
-        }
-
-        run runs = 3;
+    string language = 1;
+    string version = 2;
+    message file {
+        string content = 1;
     }
-    Result result = 1;
+    repeated file files = 3;
+    string stdin = 4;
+    repeated string args = 5;
+    int64 compile_timeout = 6;
+    int64 compile_memory_limit = 7;
+    int64 run_memory_limit = 8;
 }
 
 message ResultExcuteCode {
-    message Result {
+    string language = 1;
+    string version = 2;
+
+    message runData {
+        string stdout = 1;
+        string stderr = 2;
+        string output = 3;
+        int64 real_use_time = 4;
+        int64 cpu_use_time = 5;
+        int64 memory_use = 6;
+    }
+
+    message compileData {
+        string stdout = 1;
+        string stderr = 2;
+        string output = 3;
+        int64 code = 4;
+        int64 signal = 5;
+    }
+
+    optional compileData compile = 3;
+    runData run = 4;
+}
+
+message ListRuntimes {
+    message Runtimes {
         string language = 1;
         string version = 2;
-
-        message run {
-            string stdout = 1;
-            string stderr = 2;
-            string output = 3;
-            int64 time_usage_cpu = 4;
-            int64 time_usage_real = 5;
-            int64 memory_usage = 6;
-        }
-
-        message compile {
-            string stdout = 1;
-            string stderr = 2;
-            string output = 3;
-            int64 time_usage_cpu = 4;
-            int64 time_usage_real = 5;
-            int64 memory_usage = 6;
-        }
-
-        run runs = 3;
+        repeated string aliases = 3;
+        string runtime = 4;
     }
-    Result result = 1;
+    repeated Runtimes runtimes = 1;
 }
+
+message ListPackages {
+    message Package {
+        string language = 1;
+        string language_version = 2;
+        bool installed = 3;
+    }
+    repeated Package packages = 1;
+}
+
+message AddPackage {
+    string language = 1;
+    string version = 4;
+}
+
+message RemovePackage {
+    string language = 1;
+    string version = 4;
+}
+message EmptyRequest {}
 
 service ExcuteCodeService {
     // PingPongService has a method, which is StartPing
-    rpc sendToExcuteCode (ExcuteCode) returns (ResultExcuteCode);
+    rpc executeAPI (ExcuteCode) returns (ResultExcuteCode);
+    rpc getRunTimeAPI (EmptyRequest) returns (ListRuntimes);
+    rpc getPackageListAPI (EmptyRequest) returns (ListPackages);
+
+    rpc installPackageAPI (AddPackage) returns (AddPackage);
+    rpc uninstallPackageAPI (RemovePackage) returns (RemovePackage);
 }

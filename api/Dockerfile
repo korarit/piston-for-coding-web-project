@@ -1,4 +1,4 @@
-FROM node:15.10.0-buster-slim
+FROM node:lts
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -26,4 +26,4 @@ COPY ./src ./src
 RUN make -C ./src/nosocket/ all && make -C ./src/nosocket/ install
 
 CMD [ "node", "src"]
-EXPOSE 2000/tcp
+EXPOSE 50051
