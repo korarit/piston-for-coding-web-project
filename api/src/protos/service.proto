@@ -1,0 +1,70 @@
+syntax="proto3";
+
+// this will be package of the generated code
+package backend;
+
+option go_package = "/backend";
+
+// Message structure
+message ExcuteCode {
+    // Field number 1-15 use 1 byte, while field 16th - 2047th use 2 bytes
+    // So, the first 15 fields should be reserved for fields that are used oftenly
+    string code = 1;
+    string runtime = 2;
+    string input = 3;
+    repeated string args = 4;
+    int64 time_limit = 5;
+    int64 memory_limit = 6;
+}
+
+message ResultExcuteCodeNoCompile {
+    message Result {
+        string language = 1;
+        string version = 2;
+
+        message run {
+            string stdout = 1;
+            string stderr = 2;
+            string output = 3;
+            int64 time_usage_cpu = 4;
+            int64 time_usage_real = 5;
+            int64 memory_usage = 6;
+        }
+
+        run runs = 3;
+    }
+    Result result = 1;
+}
+
+message ResultExcuteCode {
+    message Result {
+        string language = 1;
+        string version = 2;
+
+        message run {
+            string stdout = 1;
+            string stderr = 2;
+            string output = 3;
+            int64 time_usage_cpu = 4;
+            int64 time_usage_real = 5;
+            int64 memory_usage = 6;
+        }
+
+        message compile {
+            string stdout = 1;
+            string stderr = 2;
+            string output = 3;
+            int64 time_usage_cpu = 4;
+            int64 time_usage_real = 5;
+            int64 memory_usage = 6;
+        }
+
+        run runs = 3;
+    }
+    Result result = 1;
+}
+
+service ExcuteCodeService {
+    // PingPongService has a method, which is StartPing
+    rpc sendToExcuteCode (ExcuteCode) returns (ResultExcuteCode);
+}

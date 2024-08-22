@@ -1,7 +1,18 @@
 #!/usr/bin/env node
 require('nocamel');
 const Logger = require('logplease');
-const express = require('express');
+
+const grpc = require('@grpc/grpc-js');
+const protoLoader = require('@grpc/proto-loader');
+const packageDefinition = protoLoader.loadSync(path.join(__dirname, './protos/service.proto'),{
+    keepCase: true,
+    longs: String,
+    enums: String,
+    defaults: true,
+    oneofs: true
+});
+const degreeProto = grpc.loadPackageDefinition(packageDefinition);
+
 const expressWs = require('express-ws');
 const globals = require('./globals');
 const config = require('./config');
@@ -12,10 +23,10 @@ const body_parser = require('body-parser');
 const runtime = require('./runtime');
 
 const logger = Logger.create('index');
-const app = express();
-expressWs(app);
-
 (async () => {
+
+    ////////////////////////////// CONFIGURATION //////////////////////////////
+
     logger.info('Setting loglevel to', config.log_level);
     Logger.setLogLevel(config.log_level);
     logger.debug('Ensuring data directories exist');
@@ -39,6 +50,9 @@ expressWs(app);
         path.join(config.data_directory, globals.data_directories.jobs),
         0o711
     );
+
+
+    ////////////////////////////// LOAD PACKAGES //////////////////////////////
 
     logger.info('Loading packages');
     const pkgdir = path.join(
@@ -64,6 +78,9 @@ expressWs(app);
 
     installed_languages.for_each(pkg => runtime.load_package(pkg));
 
+
+    ////////////////////////////// API SERVER //////////////////////////////
+
     logger.info('Starting API Server');
     logger.debug('Constructing Express App');
     logger.debug('Registering middleware');
@@ -79,8 +96,8 @@ expressWs(app);
 
     logger.debug('Registering Routes');
 
-    const api_v2 = require('./api/v2');
-    app.use('/api/v2', api_v2);
+    const {executeAPI, router} = require('./api/v2');
+    app.use('/api/v2', router);
 
     const { version } = require('../package.json');
 
@@ -98,6 +115,16 @@ expressWs(app);
     const server = app.listen(port, address, () => {
         logger.info('API server started on', config.bind_address);
     });
+
+    //////////////////////////// MICROSERVICE SERVER ////////////////////////////
+    const serverMicro = new grpc.Server();
+
+    server.addService(degreeProto.ExcuteCodeService.service, { sendtoexcutecode: findDegree });
+    server.bindAsync('0.0.0.0:50051', grpc.ServerCredentials.createInsecure(), () => {
+        server.start();
+    });
+    
+
 
     process.on('SIGTERM', () => {
         server.close();

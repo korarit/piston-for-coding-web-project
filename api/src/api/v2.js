@@ -1,5 +1,7 @@
-const express = require('express');
-const router = express.Router();
+// const express = require('express');
+// const router = express.Router();
+
+const grpc = require('@grpc/grpc-js');
 
 const events = require('events');
 
@@ -273,6 +275,44 @@ router.ws('/connect', async (ws, req) => {
     }, 1000);
 });
 
+
+async function executeAPI(call, callback){
+    let job;
+    try {
+        job = await get_job(req.body);
+    } catch (error) {
+        return res.status(400).json(error);
+    }
+    try {
+        await job.prime();
+
+        let result = await job.execute();
+        // Backward compatibility when the run stage is not started
+        if (result.run === undefined) {
+            result.run = result.compile;
+        }
+
+        callback(null, wrapper);
+
+    } catch (error) {
+        logger.error(`Error executing job: ${job.uuid}:\n${error}`);
+        callback({
+            message: 'Error executing job',
+            code: grpc.status.INTERNAL
+        });
+    } finally {
+        try {
+            await job.cleanup(); // This gets executed before the returns in try/catch
+        } catch (error) {
+            logger.error(`Error cleaning up job: ${job.uuid}:\n${error}`);
+            callback({
+                message: 'Error cleaning up job',
+                code: grpc.status.INTERNAL
+            })
+        }
+    }
+}
+
 router.post('/execute', authentication, async (req, res) => {
     let job;
     try {
@@ -303,6 +343,20 @@ router.post('/execute', authentication, async (req, res) => {
     }
 });
 
+
+async function runTimeAPI(call, callback){
+    const runtimes = runtime.map(rt => {
+        return {
+            language: rt.language,
+            version: rt.version.raw,
+            aliases: rt.aliases,
+            runtime: rt.runtime,
+        };
+    });
+
+    callback(null, {runtimes: runtimes});
+}
+
 router.get('/runtimes', (req, res) => {
     const runtimes = runtime.map(rt => {
         return {
@@ -315,6 +369,21 @@ router.get('/runtimes', (req, res) => {
 
     return res.status(200).send(runtimes);
 });
+
+async function getPackageListAPI(call, callback){
+    let packages = await package.get_package_list();
+
+    packages = packages.map(pkg => {
+        return {
+            language: pkg.language,
+            language_version: pkg.version.raw,
+            installed: pkg.installed,
+        };
+    });
+
+    callback(null, {packages: packages});
+}
+
 
 router.get('/packages', async (req, res) => {
     logger.debug('Request to list packages');
@@ -331,6 +400,30 @@ router.get('/packages', async (req, res) => {
     return res.status(200).send(packages);
 });
 
+
+async function installPackageAPI(call, callback){
+    let { language, version } = call.request;
+
+    let pkg = await package.get_package(language, version);
+
+    if (pkg == null) {
+        return callback({
+            message: `Requested package ${language}-${version} does not exist`,
+            code: grpc.status.NOT_FOUND
+        });
+    }
+
+    try {
+        let response = await pkg.install();
+        callback(null, response);
+    } catch (error) {
+        logger.error(`Error while installing package ${pkg.language}-${pkg.version}:\n${error}`);
+        callback({
+            message: error.message,
+            code: grpc.status.INTERNAL
+        });
+    }
+}
 router.post('/packages', async (req, res) => {
     logger.debug('Request to install package');
 
@@ -389,4 +482,4 @@ router.delete('/packages', async (req, res) => {
     }
 });
 
-module.exports = router;
+module.exports = {executeAPI, router};
