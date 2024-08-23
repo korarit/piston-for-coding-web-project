@@ -15,9 +15,10 @@ message ExcuteCode {
     repeated file files = 3;
     string stdin = 4;
     repeated string args = 5;
-    int64 compile_timeout = 6;
-    int64 compile_memory_limit = 7;
-    int64 run_memory_limit = 8;
+    int64 run_timeout = 6;
+    int64 compile_timeout = 7;
+    int64 compile_memory_limit = 8;
+    int64 run_memory_limit = 9;
 }
 
 message ResultExcuteCode {

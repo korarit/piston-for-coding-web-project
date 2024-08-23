@@ -162,13 +162,12 @@ function get_job(body) {
 async function executeAPI(call, callback){
     let job;
 
-    logger.info('Executing job', call.request);
-
     let data = {
         ...call.request,
         compile_timeout: Number(call.request.compile_timeout),
         compile_memory_limit: Number(call.request.compile_memory_limit),
         run_memory_limit: Number(call.request.run_memory_limit),
+        run_timeout: Number(call.request.run_timeout),
     }
     try {
         job = await get_job(data);
@@ -187,7 +186,6 @@ async function executeAPI(call, callback){
             result.run = result.compile;
         }
 
-        logger.info(`Jobexecuted successfully`, result);
         return callback(null, result);
 
     } catch (error) {
