@@ -10,7 +10,8 @@ message ExcuteCode {
     string language = 1;
     string version = 2;
     message file {
-        string content = 1;
+        string name = 1;
+        string content = 2;
     }
     repeated file files = 3;
     string stdin = 4;
