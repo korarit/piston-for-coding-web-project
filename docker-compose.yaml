@@ -2,7 +2,7 @@ version: '3.3'
 
 services:
     api:
-        image: piston_coding_web_v10
+        image: piston_coding_web_v11
         container_name: piston_api
         restart: always
         ports:

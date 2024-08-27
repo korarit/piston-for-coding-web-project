@@ -8,6 +8,7 @@ const globals = require('./globals');
 const fs = require('fs/promises');
 const fss = require('fs');
 const wait_pid = require('waitpid');
+const { log } = require('console');
 
 const job_states = {
     READY: Symbol('Ready to be primed'),
@@ -195,8 +196,8 @@ class Job {
             const proc_call = [
                 'nice',
                 '/usr/bin/time',
+                '-v',
                 '-o', timeOutputFile,
-                '-f', '%e,%S,%U',
                 ...timeout_call,
                 ...prlimit,
                 ...nonetwork,
@@ -322,13 +323,40 @@ class Job {
                     timeOutput = '0,0,0';  // ค่าเริ่มต้นในกรณีที่เกิดข้อผิดพลาด
                 }
 
-                const [realTime, systemTime, userTime] = timeOutput.trim().split(',');
+                const linesTimeOutput = timeOutput.split('\n');
+                let realTime = 0;
+                let systemTime = 0;
+                let userTime = 0;
+
+                logger.info(`Time output: ${timeOutput}`);
+                if (linesTimeOutput.length > 4) {
+                    const realTimeCal = () => {
+                        const elapsedTimeMatch = linesTimeOutput[4].match(/Elapsed \(wall clock\) time \(h:mm:ss or m:ss\):\s*(?:(\d+):)?(\d+):(\d+\.\d+)/);
+
+                        if (elapsedTimeMatch) {
+                            let hours = parseInt(elapsedTimeMatch[1]) || 0;
+                            let minutes = parseInt(elapsedTimeMatch[2]) || 0;
+                            let seconds = parseFloat(elapsedTimeMatch[3]) || 0;
+
+                
+                            // แปลงทั้งหมดเป็นวินาที
+                            let totalSeconds = (hours * 3600) + (minutes * 60) + seconds ;
+
+                            return totalSeconds;
+                        }
+                        return 0;
+                    };
+                    userTime = linesTimeOutput[1].split(': ')[1]
+                    systemTime = linesTimeOutput[2].split(': ')[1];
+                    realTime = realTimeCal();
+                }
+                const totalCPUTime = parseFloat(systemTime) + parseFloat(userTime);
+                logger.info(`Real Time: ${realTime}`);
 
 
                 let memory_use = (mem_usage.reduce((a, b) => Math.max(a, b), 0) / mem_usage.length);
-                const totalCPUTime = parseFloat(systemTime) + parseFloat(userTime);
 
-                resolve({ stdout, stderr, code, signal, output, real_use_time: parseFloat(realTime) * 1e9, cpu_use_time: parseFloat(totalCPUTime) * 1e9, memory_use });
+                resolve({ stdout, stderr, code, signal, output, real_use_time: parseFloat(realTime) * 1000, cpu_use_time: parseFloat(totalCPUTime) * 1000, memory_use });
             });
 
             proc.on('error', async err => {
@@ -344,12 +372,41 @@ class Job {
                     timeOutput = '0,0,0';  // ค่าเริ่มต้นในกรณีที่เกิดข้อผิดพลาด
                 }
 
-                const [realTime, systemTime, userTime] = timeOutput.trim().split(',');
+                const linesTimeOutput = timeOutput.split('\n');
+                let realTime = 0;
+                let systemTime = 0;
+                let userTime = 0;
+
+                logger.info(`Time output: ${timeOutput}`);
+                if (linesTimeOutput.length > 4) {
+                    const realTimeCal = () => {
+                        const elapsedTimeMatch = linesTimeOutput[4].match(/Elapsed \(wall clock\) time \(h:mm:ss or m:ss\):\s*(?:(\d+):)?(\d+):(\d+\.\d+)/);
+
+                        
+                        if (elapsedTimeMatch) {
+                            let hours = parseInt(elapsedTimeMatch[1]) || 0;
+                            let minutes = parseInt(elapsedTimeMatch[2]) || 0;
+                            let seconds = parseFloat(elapsedTimeMatch[3]) || 0;
+                
+                            // แปลงทั้งหมดเป็นวินาที
+                            let totalSeconds = (hours * 3600) + (minutes * 60) + seconds;
+
+                            return totalSeconds;
+                        }else{
+
+                        }
+                        return 0;
+                    };
+                    userTime = linesTimeOutput[1].split(': ')[1]
+                    systemTime = linesTimeOutput[2].split(': ')[1];
+                    realTime = realTimeCal();
+                }
                 const totalCPUTime = parseFloat(systemTime) + parseFloat(userTime);
+                logger.info(`Real Time: ${realTime}`);
 
                 let memory_use = (mem_usage.reduce((a, b) => Math.max(a, b), 0) / mem_usage.length);
 
-                reject({ error: err, stdout, stderr, output, real_use_time: parseFloat(realTime) * 1e9, cpu_use_time: parseFloat(totalCPUTime) * 1e9, memory_use });
+                reject({ error: err, stdout, stderr, output, real_use_time: parseFloat(realTime) * 1000, cpu_use_time: parseFloat(totalCPUTime) * 1000, memory_use });
             });
         });
     }
